@@ -7,12 +7,14 @@ Supports VGG-Net.
 import argparse
 import os
 import time
-from idna import valid_contextj
 import torch
 import numpy as np
 from meter_utils import AverageMeter, ProgressMeter
 from torchvision import datasets, models, transforms
 from torch import nn
+
+# https://discuss.pytorch.org/t/nan-loss-coming-after-some-time/11568/17
+torch.autograd.set_detect_anomaly(True)
 
 # https://discuss.pytorch.org/t/using-imagefolder-random-split-with-multiple-transforms/79899/3
 class LazySketchDataset(torch.utils.data.Dataset):
@@ -26,7 +28,7 @@ class LazySketchDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         if self.transform:
-            x = self.self.transform(self.dataset[index][0])
+            x = self.transform(self.dataset[index][0])
         else:
             x = self.dataset[index][0]
         y = self.dataset[index][1]
@@ -57,6 +59,8 @@ def accuracy(output, target, topk=(1,)):
         for k in topk:
             correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
             res.append(correct_k.mul_(100.0 / batch_size))
+
+        print("RES array", res)
         return res
 
 
@@ -78,8 +82,8 @@ def train(train_loader, model, criterion, optimizer, scheduler, epoch, args):
     for i, (images, target) in enumerate(train_loader):
         data_time.update(time.time() - start)
 
-        x = images.cuda(args.gpu, non_blocking=True)
-        y = target.cuda(args.gpu, non_blocking=True)
+        x = images.cuda()
+        y = target.cuda()
 
         logits = model(x)
         loss = criterion(logits, y)
@@ -95,13 +99,12 @@ def train(train_loader, model, criterion, optimizer, scheduler, epoch, args):
         optimizer.step()
         scheduler.step()
 
-        batch_time.update(time.time() - end)
-        end = time.time()
+        batch_time.update(time.time() - start)
 
         if i % args.print_freq == 0:
             progress.display(i)
 
-        print(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'.format(top1=top1, top5=top5))
+        print('Train * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'.format(top1=top1, top5=top5))
     
     return losses.avg, top1.avg, top5.avg
 
@@ -122,8 +125,8 @@ def val(test_loader, model, criterion, args):
     with torch.no_grad():
         start = time.time()
         for i, (images, target) in enumerate(test_loader):
-            images = images.cuda(args.gpu, non_blocking=True)
-            target = target.cuda(args.gpu, non_blocking=True)
+            images = images.cuda()
+            target = target.cuda()
 
             output = model(images)
             loss = criterion(output, target)
@@ -133,13 +136,12 @@ def val(test_loader, model, criterion, args):
             top1.update(acc1[0], images.size(0))
             top5.update(acc5[0], images.size(0))
 
-            batch_time.update(time.time() - end)
-            end = time.time()
+            batch_time.update(time.time() - start)
 
             if i % args.print_freq == 0:
                 progress.display(i)
 
-        print(' * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'.format(top1=top1, top5=top5))
+        print('Val * Acc@1 {top1.avg:.3f} Acc@5 {top5.avg:.3f}'.format(top1=top1, top5=top5))
 
     return losses.avg, top1.avg, top5.avg
 
@@ -158,6 +160,10 @@ def main():
     parser.add_argument("--gpu", "-g", action="store_true")
     parser.add_argument("--epochs", default=10, type=int)
     parser.add_argument("--save-dir", type=str, default="./checkpoints")
+    # Hyperparams adapted from http://cs231n.stanford.edu/reports/2017/pdfs/420.pdf
+    parser.add_argument("--learning-rate", "-lr", type=float, default=0.001, help="Initial learning rate.")
+    parser.add_argument("--momentum", type=float, default=0.9)
+    parser.add_argument("--decay", "-wd", type=float, default=0.01)
     args = parser.parse_args()
 
     if args.data == "./data/png":
@@ -182,10 +188,11 @@ def main():
         val_lazydata = LazySketchDataset(dataset, tub_test_transforms)
         test_lazydata = LazySketchDataset(dataset, tub_test_transforms)
 
+        train_size = 0.8
         num_train = len(dataset)
         indices = np.random.permutation(list(range(num_train)))
-        split = int(np.floor(0.8 * num_train))
-        val_split = int(np.floor((num_train + (1-num_train)/2) * num_train))
+        split = int(np.floor(train_size * num_train))
+        val_split = int(np.floor((train_size + (1 - train_size) / 2) * num_train))
         train_idx, val_idx, test_idx = indices[:split], indices[split:val_split], indices[val_split:]
         
         train_data = torch.utils.data.Subset(train_lazydata, indices=train_idx)
@@ -221,13 +228,20 @@ def main():
 
     if args.model == "vgg16":
         model = models.vgg16(pretrained=args.pretrained)
+        features = []
+        for feat in list(model.features):
+            features.append(feat)
+            if isinstance(feat, nn.Conv2d):
+                features.append(nn.Dropout(p=0.5, inplace=True))
+
+        model.features = nn.Sequential(*features)
         print(model)
     else:
         raise Exception(f"{args.model} is not a supported model")
 
 
     model = torch.nn.DataParallel(model).cuda()
-    criterion = nn.CrossEntropyLoss().cuda(args.gpu)
+    criterion = nn.CrossEntropyLoss().cuda()
     optimizer = torch.optim.SGD(
         model.parameters(),
         args.learning_rate,
@@ -247,11 +261,12 @@ def main():
     )
 
     # MAIN TRAINING LOOP
-    for epoch in range(args.num_epochs):
+    best_acc1 = 0
+    for epoch in range(args.epochs):
         train_losses_avg, train_top1_avg, train_top5_avg = train(train_loader, model, criterion, optimizer, scheduler, epoch, args)
         val_losses_avg, val_top1_avg, val_top5_avg = val(val_loader, model, criterion, args)
 
-        with open(os.path.join(args.save, "training_log.csv"), "a") as f:
+        with open(os.path.join(args.save_dir, "training_log.csv"), "a+") as f:
             f.write('%03d,%0.5f,%0.5f,%0.5f,%0.5f,%0.5f,%0.5f\n' % (
                 (epoch + 1),
                 train_losses_avg, train_top1_avg, train_top5_avg,
@@ -263,7 +278,7 @@ def main():
         save_file = os.path.join(args.save_dir, "final_model.pth")
         save_checkpoint({
             'epoch': epoch + 1,
-            'arch': args.arch,
+            'arch': args.model,
             'state_dict': model.state_dict(),
             'best_acc1': best_acc1,
             'optimizer' : optimizer.state_dict(),
