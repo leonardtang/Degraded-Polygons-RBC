@@ -21,13 +21,16 @@ def file_walk(path, file_extension=".png"):
 def parse_images(in_dir):
     images = []
     file_paths = []
+    i = 0
     for file_path in file_walk(in_dir):
+        print(f"Parsing file number {i}")
         img = cv.imread(file_path)
         if img is not None: 
             images.append(img)
         else:
             raise Exception("Image type not supported by OpenCV")
         file_paths.append(file_path)
+        i += 1
     return images, file_paths
     
 
@@ -70,6 +73,7 @@ def remove_corners(in_dir, out_dir_name="corners", corner_radii=[5, 10, 25, 50],
     removed = {c_radius: [] for c_radius in corner_radii}
 
     for i, im in enumerate(images):
+        print(f"Removing corners image {i}")
 
         file_path = fnames[i]
         # Corner and contour algorithms need white on black
@@ -168,6 +172,7 @@ def remove_midedge(in_dir, out_dir_name="edges", num_breaks=1, breakwidths=[0.05
     full_contours = {b_width: [] for b_width in breakwidths}
     
     for i, im in enumerate(images):
+        print(f"Removing mid-edge image {i}")
 
         file_path = fnames[i]
         # Corner and contour algorithms need white on black
@@ -204,7 +209,7 @@ def remove_midedge(in_dir, out_dir_name="edges", num_breaks=1, breakwidths=[0.05
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data-dir", "-d", type=str, default="./data/sketches")
+    parser.add_argument("--data-dir", "-d", type=str, default="./data/png")
     parser.add_argument("--corner-out", "-c", type=str, default="corners")
     parser.add_argument("--edge-out", "-e", type=str, default="edges")
     args = parser.parse_args()
