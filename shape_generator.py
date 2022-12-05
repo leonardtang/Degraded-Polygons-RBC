@@ -9,13 +9,22 @@ from tqdm import tqdm
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
 CIRCLE = 1
+classes = {
+    CIRCLE: 0, 
+    3: 1, 
+    4: 2, 
+    5: 3, 
+    6: 4, 
+    7: 5,
+    8: 6,
+}
 
-def compute_obstruction_radius(num_sides, remove_prop):
+def compute_obstruction_radius(num_sides, remove_prop, perimeter):
     """
     For fixed remove_prop on the global image, determine appropriate local obstruction radius
     """
-    r = remove_prop / (2 * num_sides)
-    return r
+    r_prop = remove_prop / (2 * num_sides)
+    return r_prop * perimeter
 
 def generate_metadata(save_dir):
     """
@@ -25,7 +34,7 @@ def generate_metadata(save_dir):
     for shape_type in ['whole', 'nocorners', 'noedges']:
         
         df = pd.DataFrame(columns=['filename', 'label'])
-        for path in tqdm(os.listdir(save_dir)):
+        for path in tqdm(os.listdir(f'{save_dir}/pngs')):
             if path.endswith(f'{shape_type}.png'):
                 df = pd.concat([df, pd.DataFrame([[path, int(path.split('_')[0])]], columns=['filename', 'label'])])
 
@@ -57,13 +66,16 @@ def main(classes, num_per_class, img_size, min_radius, thickness, bg_color, fg_c
                 angles = [angle + 2 * np.pi * i / num_sides for i in range(num_sides)]
                 points = np.array([(x + radius * np.cos(angle), y + radius * np.sin(angle)) for angle in angles], np.int32)
                 img = cv2.polylines(img, [points], True, fg_color, thickness)
+                perimeter = 0
+                for i in range(num_sides):
+                    perimeter += math.dist((points[i][0], points[i][1]), (points[(i + 1) % num_sides][0], points[(i + 1) % num_sides][1]))
         
                 cv2.imwrite(f'{save_dir}/pngs/{num_sides}_{k}_whole.png', img)
                 
                 img_nocorners = img.copy()
                 for corner_x, corner_y in points:
                     # Obstruct corners by overlaying white circle on top
-                    cv2.circle(img_nocorners, (corner_x, corner_y), math.ceil(compute_obstruction_radius(num_sides, prop_to_remove)), bg_color, -1)
+                    cv2.circle(img_nocorners, (corner_x, corner_y), math.ceil(compute_obstruction_radius(num_sides, prop_to_remove, perimeter)), bg_color, -1)
                 
                 cv2.imwrite(f'{save_dir}/pngs/{num_sides}_{k}_nocorners.png', img_nocorners)
 
@@ -73,7 +85,7 @@ def main(classes, num_per_class, img_size, min_radius, thickness, bg_color, fg_c
                     cv2.circle(
                         img_noedges, 
                         (int((points[i][0] + points[(i + 1) % num_sides][0]) / 2), int((points[i][1] + points[(i + 1) % num_sides][1]) / 2)), 
-                        math.ceil(compute_obstruction_radius(num_sides, prop_to_remove)), 
+                        math.ceil(compute_obstruction_radius(num_sides, prop_to_remove, perimeter)), 
                         bg_color, 
                         -1,
                     )
@@ -92,17 +104,16 @@ def main(classes, num_per_class, img_size, min_radius, thickness, bg_color, fg_c
     generate_metadata(save_dir)
 
 if __name__ == "__main__":
-    classes = [CIRCLE, 3, 4, 5, 6, 7, 8]
     bg_color = WHITE
     fg_color = BLACK
     
     parser = argparse.ArgumentParser()
-    parser.add_argument("--num-shapes-per-class", "-n", default=1000)
-    parser.add_argument("--img-size", "-s", default=224)
-    parser.add_argument("--min-radius-div", "-m", default=5)
-    parser.add_argument("--remove-prop", "-r", default=0.3)
-    parser.add_argument("--thickness", "-t", default=2)
-    parser.add_argument("--save-dir", "-d", default="./images/shapes_1000")
+    parser.add_argument("--num-shapes-per-class", "-n", default=1000, type=int)
+    parser.add_argument("--img-size", "-s", default=224, type=int)
+    parser.add_argument("--min-radius-div", "-m", default=5, type=float)
+    parser.add_argument("--remove-prop", "-r", default=0.3, type=float)
+    parser.add_argument("--thickness", "-t", default=2, type=int)
+    parser.add_argument("--save-dir", "-d", default="./images/shapes_1000", type=str)
 
     args = parser.parse_args()
     print_args = "\n".join(f'{k}={v}' for k, v in vars(args).items())

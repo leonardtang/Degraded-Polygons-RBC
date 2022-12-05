@@ -8,10 +8,10 @@ from PIL import Image
 from torch import nn
 from torchvision import models, transforms
 from tqdm import tqdm
+from shape_generator import classes
 
 device = torch.device('cuda:5' if torch.cuda.is_available() else 'cpu')
 
-# Create torch dataset from images
 class ShapesDataset(torch.utils.data.Dataset):
 
     def __init__(self, metadata, data_dir, transform=None):
@@ -26,14 +26,9 @@ class ShapesDataset(torch.utils.data.Dataset):
         if torch.is_tensor(index):
             index = index.tolist()
         
-        # Read images and targets
-        img_path = os.path.join(self.data_dir, self.metadata.iloc[index, 0])
-        # print("img_path", img_path)
+        img_path = os.path.join(f'{self.data_dir}/pngs', self.metadata.iloc[index, 0])
         image = Image.open(img_path)
-        label = self.metadata.iloc[index, 1]
-        
-        # # Convert image to channels first
-        # image = np.transpose(image, (2, 0, 1))
+        label = classes[self.metadata.iloc[index, 1]]
 
         # Transform if requested
         if self.transform:
@@ -64,11 +59,10 @@ def accuracy(output, target, topk=(1,)):
             correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
             res.append(correct_k.mul_(100.0 / batch_size))
 
-        # print("RES array", res)
         return res
 
 
-def train(train_loader, model, criterion, optimizer, scheduler):
+def train(train_loader, model, criterion, optimizer):
     
     model.train()
     top_1, top_5 = 0, 0
@@ -109,7 +103,7 @@ def val(test_loader, model, criterion, args):
     val_loss = 0.0
 
     with torch.no_grad():
-        for i, (images, target) in enumerate(test_loader):
+        for _, (images, target) in enumerate(test_loader):
             images = images.to(device)
             target = target.to(device)
 
@@ -123,33 +117,31 @@ def val(test_loader, model, criterion, args):
 
     return val_loss/ len(test_loader), top_1 / len(test_loader), top_5 / len(test_loader)
 
-# For v1 shapes dataset: mean = [0.8449, 0.8449, 0.8449] and std = [0.3620, 0.3620, 0.3620]
-def dataset_stats(args):
-    # Compute mean and STD of dataset
+
+def dataset_stats(args, metadata_path):
+    """
+    Compute mean and STD of dataset
+    For shapes-1000 dataset: mean = [0.9857, 0.9857, 0.9857] and std = [0.1188, 0.1188, 0.1188]
+    """
+
     psum    = torch.tensor([0.0, 0.0, 0.0])
     psum_sq = torch.tensor([0.0, 0.0, 0.0])
 
     dummy_transforms = transforms.Compose([transforms.ToTensor()])
-    dummy_data = ShapesDataset(metadata='metadata_whole.csv', data_dir = args.data, transform = dummy_transforms)
+    dummy_data = ShapesDataset(metadata=metadata_path, data_dir=args.data, transform=dummy_transforms)
     dummy_loader = torch.utils.data.DataLoader(
         dummy_data, 
         batch_size=args.batch_size,
         num_workers=args.num_workers, 
-        shuffle=True,
-        # Unclear if we need drop_last, e.g. AugMix doesn't have this
-        drop_last=True)
+        shuffle=True)
 
-    for imgs, labels in tqdm(dummy_loader):
+    for imgs, _ in tqdm(dummy_loader):
         psum    += imgs.sum(axis        = [0, 2, 3])
         psum_sq += (imgs ** 2).sum(axis = [0, 2, 3])
 
-    # print("imgs[0]", imgs[0])
-    # print("imgs[0].shape", imgs[0].shape)
     image_size = imgs[0].shape[1]
-    # print("image_size", image_size)
     count = len(dummy_loader.dataset) * image_size * image_size
 
-    # mean and std
     total_mean = psum / count
     total_var  = (psum_sq / count) - (total_mean ** 2)
     total_std  = torch.sqrt(total_var)
@@ -164,7 +156,7 @@ def main():
         description="Trains classifier on shapes dataset", 
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
-    parser.add_argument("--data", "-d", type=str, default="./images/shapes", choices=["./images/shapes"])
+    parser.add_argument("--data", "-d", type=str, default="./images/shapes", choices=["./images/shapes", "./images/shapes_1000"])
     parser.add_argument("--model", "-m", type=str, default="resnet18")
     parser.add_argument("--num-workers", type=int, default=16)
     parser.add_argument("--batch-size", "-b", type=int, default=512)
@@ -176,68 +168,10 @@ def main():
     parser.add_argument("--learning-rate", "-lr", type=float, default=0.01, help="Initial learning rate.")
     parser.add_argument("--momentum", type=float, default=0.9)
     parser.add_argument("--decay", "-wd", type=float, default=1e-4)
+    parser.add_argument("--evaluate", "-e", action="store_true")
     args = parser.parse_args()
     print("*** Arguments: ***")
     print(" ".join(f'{k}={v}' for k, v in vars(args).items()))
-
-    if args.data == "./images/shapes":
-        mean, std = dataset_stats(args)
-        tub_train_transforms = transforms.Compose([
-            # transforms.RandomResizedCrop(224),
-            transforms.Resize(224), 
-            transforms.RandomHorizontalFlip(),
-            transforms.RandomRotation(25),
-            transforms.ToTensor(),
-            transforms.Normalize(mean, std) 
-        ])
-    
-        tub_test_transforms = transforms.Compose([
-            # transforms.CenterCrop(224),
-            transforms.Resize(224), 
-            transforms.ToTensor(),
-            transforms.Normalize(mean, std)
-        ])
-
-        # Initialize train, val, test sets
-        # Train on whole images, and see ability to generalize to edge/corner removed images
-        train_data = ShapesDataset(metadata='metadata_whole.csv', data_dir = args.data, transform = tub_train_transforms)
-        val_data = ShapesDataset(metadata='metadata_whole.csv', data_dir = args.data, transform = tub_test_transforms)
-        test_data = ShapesDataset(metadata='metadata_whole.csv', data_dir = args.data, transform = tub_test_transforms)
-
-        # Get train, val, test splits
-        train_size = 0.6
-        # total_num_train = len(train_data.metadata)
-        total_num_train = len(train_data)
-        indices = np.random.permutation(list(range(total_num_train)))
-        split = int(np.floor(train_size * total_num_train))
-        val_split = int(np.floor((train_size + (1 - train_size) / 2) * total_num_train))
-        train_idx, val_idx, test_idx = indices[:split], indices[split:val_split], indices[val_split:]
-        
-        # Subset train, val, test sets
-        train_data = torch.utils.data.Subset(train_data, indices=train_idx)
-        val_data = torch.utils.data.Subset(val_data, indices=val_idx)
-        test_data = torch.utils.data.Subset(test_data, indices=test_idx)
-
-    else:
-        raise Exception(f"{args.data} is not a supported dataset")
-
-    train_loader = torch.utils.data.DataLoader(
-        train_data, 
-        batch_size=args.batch_size,
-        num_workers=args.num_workers, 
-        shuffle=True)
-
-    val_loader = torch.utils.data.DataLoader(
-        val_data, 
-        batch_size=args.batch_size,
-        num_workers=args.num_workers, 
-        shuffle=True)
-
-    test_loader = torch.utils.data.DataLoader(
-        test_data, 
-        batch_size=args.batch_size,
-        num_workers=args.num_workers, 
-        shuffle=True)
 
     if args.model == "vgg16":
         model = models.vgg16(pretrained=args.pretrained)
@@ -246,10 +180,14 @@ def main():
             features.append(feat)
             if isinstance(feat, nn.Conv2d):
                 features.append(nn.Dropout(p=0.55, inplace=True))
-
+        
         model.features = nn.Sequential(*features)
+        model.fc = torch.nn.Linear(512, len(classes))
+
     elif args.model == "resnet18":
         model = models.resnet18(pretrained=args.pretrained)
+        model.fc = torch.nn.Linear(512, len(classes))
+
     else:
         raise Exception(f"{args.model} is not a supported model")
 
@@ -259,7 +197,7 @@ def main():
     optimizer = torch.optim.SGD(
         model.parameters(),
         args.learning_rate,
-        # momentum=args.momentum,
+        momentum=args.momentum,
         weight_decay=args.decay,
         # nesterov=True
     )
@@ -274,65 +212,158 @@ def main():
     #     )
     # )
 
-    lin_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)
 
-    train_log = os.path.join(args.save_dir, "training_log.csv")
-    # Clear out previous training run contents
-    with open(train_log, 'w+'):
-        pass
+    ### Main training loop
+    if not args.evaluate:
+        if args.data.startswith("./images/shapes"):
+            whole_mean, whole_std = dataset_stats(args, "metadata_whole.csv")
+            tub_train_transforms = transforms.Compose([
+                # transforms.RandomResizedCrop(224),
+                # transforms.Resize(224), 
+                transforms.RandomHorizontalFlip(),
+                transforms.RandomRotation(25),
+                transforms.ToTensor(),
+                transforms.Normalize(whole_mean, whole_std) 
+            ])
+        
+            tub_test_transforms = transforms.Compose([
+                # transforms.CenterCrop(224),
+                # transforms.Resize(224), 
+                transforms.ToTensor(),
+                transforms.Normalize(whole_mean, whole_std)
+            ])
 
-    # MAIN TRAINING LOOP
-    best_top5 = 0
-    print("\nTraining Model...")
-    for epoch in range(args.epochs):
-        print(f"Epoch: {epoch}")
-        train_losses_avg, train_top1_avg, train_top5_avg = train(train_loader, model, criterion, optimizer, None)
-        print('Train * Acc@1 {top1:.3f} Acc@5 {top5:.3f}'.format(top1=train_top1_avg, top5=train_top5_avg))
-        val_losses_avg, val_top1_avg, val_top5_avg = val(val_loader, model, criterion, args)
-        print('Val * Acc@1 {top1:.3f} Acc@5 {top5:.3f}'.format(top1=val_top1_avg, top5=val_top5_avg))
+            # Initialize train, val, test sets
+            # Train on whole images, and see ability to generalize to edge/corner removed images
+            train_data = ShapesDataset(metadata='metadata_whole.csv', data_dir = args.data, transform = tub_train_transforms)
+            val_data = ShapesDataset(metadata='metadata_whole.csv', data_dir = args.data, transform = tub_test_transforms)
+            test_data = ShapesDataset(metadata='metadata_whole.csv', data_dir = args.data, transform = tub_test_transforms)
 
-        if lin_scheduler:
-            lin_scheduler.step(val_losses_avg)
+            # Get train, val, test splits
+            train_size = 0.6
+            total_num_train = len(train_data)
 
-        os.makedirs(args.save_dir, exist_ok = True)          
-        with open(train_log, "a") as f:
-          f.write(f'{(epoch + 1)},{train_losses_avg},{train_top1_avg},{train_top5_avg},{val_losses_avg},{val_top1_avg},{val_top5_avg}\n')
+            print("TOTAL NUM TRAIN?", total_num_train)
 
-        if val_top5_avg > best_top5:
-            best_top5 = max(val_top5_avg, best_top5)
-            save_file = os.path.join(args.save_dir, "final_model.pth")
-            save_checkpoint({
-                'epoch': epoch + 1,
-                'arch': args.model,
-                'state_dict': model.state_dict(),
-                'best_top5': best_top5,
-                'optimizer' : optimizer.state_dict(),
-            }, filename=save_file)
+            indices = np.random.permutation(list(range(total_num_train)))
+            split = int(np.floor(train_size * total_num_train))
+            val_split = int(np.floor((train_size + (1 - train_size) / 2) * total_num_train))
+            train_idx, val_idx, test_idx = indices[:split], indices[split:val_split], indices[val_split:]
+            
+            # Subset train, val, test sets
+            train_data = torch.utils.data.Subset(train_data, indices=train_idx)
+            val_data = torch.utils.data.Subset(val_data, indices=val_idx)
+            test_data = torch.utils.data.Subset(test_data, indices=test_idx)
 
-    best_cp = torch.load(save_file)
-    model.load_state_dict(best_cp["state_dict"])
-    test_losses_avgs, test_top1_avg, test_top5_avg = val(test_loader, model, criterion, args)
-    print(f'Test * Acc@1 {test_top1_avg:.3f} Acc@5 {test_top5_avg:.3f}')
+        else:
+            raise Exception(f"{args.data} is not a supported dataset")
 
-    # Plot training curves
-    df = pd.read_csv(train_log, header=None)
-    df.columns = ['epoch', 'train_loss', 'train_acc1', 'train_acc5', 'val_loss', 'val_acc1', 'val_acc5']
+        train_loader = torch.utils.data.DataLoader(
+            train_data, 
+            batch_size=args.batch_size,
+            num_workers=args.num_workers, 
+            shuffle=True)
 
-    plt.figure(figsize=(10, 5))
-    plt.subplot(1, 2, 1)
-    plt.plot(df['epoch'], df['train_loss'], label='train')
-    plt.plot(df['epoch'], df['val_loss'], label='val')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.legend()
+        val_loader = torch.utils.data.DataLoader(
+            val_data, 
+            batch_size=args.batch_size,
+            num_workers=args.num_workers, 
+            shuffle=True)
 
-    plt.subplot(1, 2, 2)
-    plt.plot(df['epoch'], df['train_acc1'], label='train')
-    plt.plot(df['epoch'], df['val_acc1'], label='val')
-    plt.xlabel('Epoch')
-    plt.ylabel('Accuracy')
-    plt.legend()
-    plt.savefig("acc-loss-v3.png")
+        test_loader = torch.utils.data.DataLoader(
+            test_data, 
+            batch_size=args.batch_size,
+            num_workers=args.num_workers, 
+            shuffle=True)
+        
+        lin_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)
+        
+        train_log = os.path.join(args.save_dir, "training_log.csv")
+        with open(train_log, 'w+'): pass
+
+        best_top1 = 0
+        save_file = os.path.join(args.save_dir, "final_model.pth")
+        print("\nTraining Model...")
+
+        for epoch in range(args.epochs):
+            print(f"Epoch: {epoch}")
+
+            train_losses_avg, train_top1_avg, train_top5_avg = train(train_loader, model, criterion, optimizer)
+            print('Train * Acc@1 {top1:.3f} Acc@5 {top5:.3f}'.format(top1=train_top1_avg, top5=train_top5_avg))
+            val_losses_avg, val_top1_avg, val_top5_avg = val(val_loader, model, criterion, args)
+            print('Val * Acc@1 {top1:.3f} Acc@5 {top5:.3f}'.format(top1=val_top1_avg, top5=val_top5_avg))
+
+            if lin_scheduler:
+                lin_scheduler.step(val_losses_avg)
+
+            os.makedirs(args.save_dir, exist_ok=True)          
+            with open(train_log, "a") as f:
+                f.write(f'{(epoch + 1)},{train_losses_avg},{train_top1_avg},{train_top5_avg},{val_losses_avg},{val_top1_avg},{val_top5_avg}\n')
+
+            if val_top1_avg > best_top1:
+                best_top1 = max(val_top1_avg, best_top1)
+                save_checkpoint({
+                    'epoch': epoch + 1,
+                    'arch': args.model,
+                    'state_dict': model.state_dict(),
+                    'best_top1': best_top1,
+                    'optimizer' : optimizer.state_dict(),
+                }, filename=save_file)
+
+        best_cp = torch.load(save_file)
+        model.load_state_dict(best_cp["state_dict"])
+        _, test_top1_avg, test_top5_avg = val(test_loader, model, criterion, args)
+        print(f'Test * Acc@1 {test_top1_avg:.3f} Acc@5 {test_top5_avg:.3f}')
+
+        # Plot training curves
+        df = pd.read_csv(train_log, header=None)
+        df.columns = ['epoch', 'train_loss', 'train_acc1', 'train_acc5', 'val_loss', 'val_acc1', 'val_acc5']
+
+        plt.figure(figsize=(10, 5))
+        plt.subplot(1, 2, 1)
+        plt.plot(df['epoch'], df['train_loss'], label='train')
+        plt.plot(df['epoch'], df['val_loss'], label='val')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.legend()
+
+        plt.subplot(1, 2, 2)
+        plt.plot(df['epoch'], df['train_acc1'], label='train')
+        plt.plot(df['epoch'], df['val_acc1'], label='val')
+        plt.xlabel('Epoch')
+        plt.ylabel('Accuracy')
+        plt.legend()
+        plt.savefig("acc-loss-v3.png")
+
+
+    ### Evaluate on no corner and no edge datasets
+    noedges_mean, noedges_std = dataset_stats(args, "metadata_noedges.csv")
+    noedges_transforms = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(noedges_mean, noedges_std)
+        ])
+    noedges_data = ShapesDataset(metadata='metadata_noedges.csv', data_dir=args.data, transform=noedges_transforms)
+    noedges_loader = torch.utils.data.DataLoader(
+        noedges_data, 
+        batch_size=args.batch_size,
+        num_workers=args.num_workers, 
+        shuffle=True)
+    _, test_top1_avg, test_top5_avg = val(noedges_loader, model, criterion, args)
+    print(f'No Edges * Acc@1 {test_top1_avg:.3f} Acc@5 {test_top5_avg:.3f}')
+
+    nocorners_mean, nocorners_std = dataset_stats(args, "metadata_nocorners.csv")
+    noedges_transforms = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(nocorners_mean, nocorners_std)
+        ])
+    nocorners_data = ShapesDataset(metadata='metadata_nocorners.csv', data_dir=args.data, transform=noedges_transforms)
+    nocorners_loader = torch.utils.data.DataLoader(
+        nocorners_data, 
+        batch_size=args.batch_size,
+        num_workers=args.num_workers, 
+        shuffle=True)
+    _, test_top1_avg, test_top5_avg = val(nocorners_loader, model, criterion, args)
+    print(f'No Corners * Acc@1 {test_top1_avg:.3f} Acc@5 {test_top5_avg:.3f}')
     
 if __name__ == "__main__":
     main()
