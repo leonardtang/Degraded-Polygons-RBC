@@ -41,7 +41,7 @@ def generate_metadata(save_dir):
         df.to_csv(f'{save_dir}/metadata_{shape_type}.csv', index=False)
 
 
-def main(classes, num_per_class, img_size, min_radius, thickness, bg_color, fg_color, save_dir, prop_to_remove):
+def main(classes, num_per_class, img_size, min_radius, thickness, bg_color, fg_color, save_dir, prop_to_remove, generate_whole):
 
     for num_sides in classes:
         for k in tqdm(range(num_per_class)):
@@ -70,7 +70,8 @@ def main(classes, num_per_class, img_size, min_radius, thickness, bg_color, fg_c
                 for i in range(num_sides):
                     perimeter += math.dist((points[i][0], points[i][1]), (points[(i + 1) % num_sides][0], points[(i + 1) % num_sides][1]))
         
-                cv2.imwrite(f'{save_dir}/pngs/{num_sides}_{k}_whole.png', img)
+                if generate_whole:
+                    cv2.imwrite(f'{save_dir}/pngs/{num_sides}_{k}_whole.png', img)
                 
                 img_nocorners = img.copy()
                 for corner_x, corner_y in points:
@@ -94,9 +95,10 @@ def main(classes, num_per_class, img_size, min_radius, thickness, bg_color, fg_c
 
             elif num_sides == CIRCLE:
 
-                # Only generate whole image for circle, since there are no corners/midpoints
-                img = cv2.circle(img, (x, y), radius, fg_color, thickness)
-                cv2.imwrite(f'{save_dir}/pngs/{num_sides}_{k}_whole.png', img)
+                if generate_whole:
+                    # Only generate whole image for circle, since there are no corners/midpoints
+                    img = cv2.circle(img, (x, y), radius, fg_color, thickness)
+                    cv2.imwrite(f'{save_dir}/pngs/{num_sides}_{k}_whole.png', img)
 
             else:
                 raise Exception(f"Invalid number of sides: {num_sides}")
@@ -114,6 +116,7 @@ if __name__ == "__main__":
     parser.add_argument("--remove-prop", "-r", default=0.3, type=float)
     parser.add_argument("--thickness", "-t", default=2, type=int)
     parser.add_argument("--save-dir", "-d", default="./images/shapes_1000", type=str)
+    parser.add_argument("--generate-whole", "-w", action="store_true")
 
     args = parser.parse_args()
     print_args = "\n".join(f'{k}={v}' for k, v in vars(args).items())
@@ -125,4 +128,4 @@ if __name__ == "__main__":
         f.write(print_args)
     
     min_radius = int(args.img_size / args.min_radius_div)
-    main(classes, args.num_shapes_per_class, args.img_size, min_radius, args.thickness, bg_color, fg_color, args.save_dir, args.remove_prop)
+    main(classes, args.num_shapes_per_class, args.img_size, min_radius, args.thickness, bg_color, fg_color, args.save_dir, args.remove_prop, args.generate_whole)

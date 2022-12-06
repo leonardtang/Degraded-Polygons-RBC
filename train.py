@@ -10,7 +10,7 @@ from torchvision import models, transforms
 from tqdm import tqdm
 from shape_generator import classes
 
-device = torch.device('cuda:5' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 class ShapesDataset(torch.utils.data.Dataset):
 
@@ -156,11 +156,12 @@ def main():
         description="Trains classifier on shapes dataset", 
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
-    parser.add_argument("--data", "-d", type=str, default="./images/shapes", choices=["./images/shapes", "./images/shapes_1000"])
+    parser.add_argument("--data", "-d", type=str, default="./images/shapes")
     parser.add_argument("--model", "-m", type=str, default="resnet18")
     parser.add_argument("--num-workers", type=int, default=16)
     parser.add_argument("--batch-size", "-b", type=int, default=512)
-    parser.add_argument("--pretrained", "-p", action="store_true")
+    parser.add_argument("--pretrained-imagenet", "-pi", action="store_true")
+    parser.add_argument("--pretrained-path", "-pp", type=str)
     parser.add_argument("--print-freq", "-f", type=int, default=10)
     parser.add_argument("--epochs", default=120, type=int)
     parser.add_argument("--save-dir", type=str, default="./checkpoints")
@@ -173,8 +174,14 @@ def main():
     print("*** Arguments: ***")
     print(" ".join(f'{k}={v}' for k, v in vars(args).items()))
 
+    # Choose only one pretraining souce
+    assert not (args.pretrained_imagenet and args.pretrained_path)
+
     if args.model == "vgg16":
-        model = models.vgg16(pretrained=args.pretrained)
+        if args.pretrained_imagenet:
+            model = models.vgg16(pretrained=True)
+        else:
+            model = models.vgg16()
         features = []
         for feat in list(model.features):
             features.append(feat)
@@ -185,7 +192,17 @@ def main():
         model.fc = torch.nn.Linear(512, len(classes))
 
     elif args.model == "resnet18":
-        model = models.resnet18(pretrained=args.pretrained)
+        if args.pretrained_imagenet:
+            model = models.resnet18(pretrained=True)
+        elif args.pretrained_path:
+            model = models.resnet18()
+            if args.pretrained_path.endswith("FractalDB-10000_res18.pth"):
+                model.fc = torch.nn.Linear(512, 10000)        
+            elif args.pretrained_path.endswith("FractalDB-1000_res18.pth"):
+                model.fc = torch.nn.Linear(512, 1000)
+            model.load_state_dict(torch.load(args.pretrained_path))
+        else:
+            model = models.resnet18()
         model.fc = torch.nn.Linear(512, len(classes))
 
     else:
@@ -202,16 +219,18 @@ def main():
         # nesterov=True
     )
 
-    # scheduler = torch.optim.lr_scheduler.LambdaLR(
-    #     optimizer,
-    #     lr_lambda=lambda step: cosine_annealing( 
-    #         step,
-    #         args.epochs * len(train_loader),
-    #         1,  
-    #         1e-6 / args.learning_rate
-    #     )
-    # )
+    sub_save_dir = os.path.join(args.save_dir, args.data.split("/")[-1])
+    os.makedirs(sub_save_dir, exist_ok=True)
+    print("\nSub Save Dir", sub_save_dir)
+    
+    save_suffix = ""
+    if args.pretrained_imagenet:
+        save_suffix = "imagenet"
+    elif args.pretrained_path:
+        save_suffix = args.pretrained_path.split("/")[-1].split(".")[0]
 
+    save_file = os.path.join(sub_save_dir, f"final_model_{save_suffix}.pth")
+    print("\nSave File:", save_file)
 
     ### Main training loop
     if not args.evaluate:
@@ -242,8 +261,7 @@ def main():
             # Get train, val, test splits
             train_size = 0.6
             total_num_train = len(train_data)
-
-            print("TOTAL NUM TRAIN?", total_num_train)
+            print("Total Number of Dataset Examples:", total_num_train)
 
             indices = np.random.permutation(list(range(total_num_train)))
             split = int(np.floor(train_size * total_num_train))
@@ -278,11 +296,10 @@ def main():
         
         lin_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)
         
-        train_log = os.path.join(args.save_dir, "training_log.csv")
+        train_log = os.path.join(sub_save_dir, "training_log.csv")
         with open(train_log, 'w+'): pass
 
         best_top1 = 0
-        save_file = os.path.join(args.save_dir, "final_model.pth")
         print("\nTraining Model...")
 
         for epoch in range(args.epochs):
@@ -295,8 +312,7 @@ def main():
 
             if lin_scheduler:
                 lin_scheduler.step(val_losses_avg)
-
-            os.makedirs(args.save_dir, exist_ok=True)          
+          
             with open(train_log, "a") as f:
                 f.write(f'{(epoch + 1)},{train_losses_avg},{train_top1_avg},{train_top5_avg},{val_losses_avg},{val_top1_avg},{val_top5_avg}\n')
 
@@ -337,6 +353,9 @@ def main():
 
 
     ### Evaluate on no corner and no edge datasets
+    best_cp = torch.load(save_file)
+    model.load_state_dict(best_cp["state_dict"])
+
     noedges_mean, noedges_std = dataset_stats(args, "metadata_noedges.csv")
     noedges_transforms = transforms.Compose([
             transforms.ToTensor(),
