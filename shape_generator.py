@@ -19,6 +19,16 @@ classes = {
     8: 6,
 }
 
+classes_to_string = {
+    0: "circle",
+    1: "triangle",
+    2: "square",
+    3: "pentagon",
+    4: "hexagon",
+    5: "septagon",
+    6: "octagon",
+}
+
 def compute_obstruction_radius(num_sides, remove_prop, perimeter):
     """
     For fixed remove_prop on the global image, determine appropriate local obstruction radius
@@ -34,7 +44,7 @@ def generate_metadata(save_dir):
     for shape_type in ['whole', 'nocorners', 'noedges']:
         
         df = pd.DataFrame(columns=['filename', 'label'])
-        for path in tqdm(os.listdir(f'{save_dir}/pngs')):
+        for path in tqdm(sorted(os.listdir(f'{save_dir}/pngs'))):
             if path.endswith(f'{shape_type}.png'):
                 df = pd.concat([df, pd.DataFrame([[path, int(path.split('_')[0])]], columns=['filename', 'label'])])
 

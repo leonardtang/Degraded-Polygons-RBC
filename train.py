@@ -10,7 +10,7 @@ from torchvision import models, transforms
 from tqdm import tqdm
 from shape_generator import classes
 
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
 
 class ShapesDataset(torch.utils.data.Dataset):
 
@@ -151,6 +151,54 @@ def dataset_stats(args, metadata_path):
     return total_mean, total_std
 
 
+def get_noedges_loader(args, sampler=None):
+    noedges_mean, noedges_std = dataset_stats(args, "metadata_noedges.csv")
+    noedges_transforms = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(noedges_mean, noedges_std)
+        ])
+    noedges_data = ShapesDataset(metadata='metadata_noedges.csv', data_dir=args.data, transform=noedges_transforms)
+
+    if sampler:
+        noedges_loader = torch.utils.data.DataLoader(
+            noedges_data, 
+            batch_size=args.batch_size,
+            num_workers=args.num_workers, 
+            sampler=sampler)
+    else:
+        noedges_loader = torch.utils.data.DataLoader(
+            noedges_data, 
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            shuffle=True)
+
+    return noedges_loader
+
+
+def get_nocorners_loader(args, sampler=None):
+    nocorners_mean, nocorners_std = dataset_stats(args, "metadata_nocorners.csv")
+    noedges_transforms = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(nocorners_mean, nocorners_std)
+        ])
+    nocorners_data = ShapesDataset(metadata='metadata_nocorners.csv', data_dir=args.data, transform=noedges_transforms)
+    
+    if sampler:
+        nocorners_loader = torch.utils.data.DataLoader(
+            nocorners_data, 
+            batch_size=args.batch_size,
+            num_workers=args.num_workers, 
+            sampler=sampler)
+    else:
+        nocorners_loader = torch.utils.data.DataLoader(
+            nocorners_data, 
+            batch_size=args.batch_size,
+            num_workers=args.num_workers,
+            shuffle=True)
+
+    return nocorners_loader
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Trains classifier on shapes dataset", 
@@ -158,7 +206,7 @@ def main():
     )
     parser.add_argument("--data", "-d", type=str, default="./images/shapes")
     parser.add_argument("--model", "-m", type=str, default="resnet18")
-    parser.add_argument("--num-workers", type=int, default=16)
+    parser.add_argument("--num-workers", "-w", type=int, default=16)
     parser.add_argument("--batch-size", "-b", type=int, default=512)
     parser.add_argument("--pretrained-imagenet", "-pi", action="store_true")
     parser.add_argument("--pretrained-path", "-pp", type=str)
@@ -356,31 +404,11 @@ def main():
     best_cp = torch.load(save_file)
     model.load_state_dict(best_cp["state_dict"])
 
-    noedges_mean, noedges_std = dataset_stats(args, "metadata_noedges.csv")
-    noedges_transforms = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize(noedges_mean, noedges_std)
-        ])
-    noedges_data = ShapesDataset(metadata='metadata_noedges.csv', data_dir=args.data, transform=noedges_transforms)
-    noedges_loader = torch.utils.data.DataLoader(
-        noedges_data, 
-        batch_size=args.batch_size,
-        num_workers=args.num_workers, 
-        shuffle=True)
+    noedges_loader = get_noedges_loader(args)
     _, test_top1_avg, test_top5_avg = val(noedges_loader, model, criterion, args)
     print(f'No Edges * Acc@1 {test_top1_avg:.3f} Acc@5 {test_top5_avg:.3f}')
 
-    nocorners_mean, nocorners_std = dataset_stats(args, "metadata_nocorners.csv")
-    noedges_transforms = transforms.Compose([
-            transforms.ToTensor(),
-            transforms.Normalize(nocorners_mean, nocorners_std)
-        ])
-    nocorners_data = ShapesDataset(metadata='metadata_nocorners.csv', data_dir=args.data, transform=noedges_transforms)
-    nocorners_loader = torch.utils.data.DataLoader(
-        nocorners_data, 
-        batch_size=args.batch_size,
-        num_workers=args.num_workers, 
-        shuffle=True)
+    nocorners_loader = get_nocorners_loader(args)
     _, test_top1_avg, test_top5_avg = val(nocorners_loader, model, criterion, args)
     print(f'No Corners * Acc@1 {test_top1_avg:.3f} Acc@5 {test_top5_avg:.3f}')
     
