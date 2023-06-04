@@ -4,19 +4,16 @@ import torch
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-# from models.modeling import MlpMixer, CONFIGS
+from model import get_model
 from shape_generator import classes
 from PIL import Image
 from torch import nn
 from torchvision import models, transforms
 from tqdm import tqdm
 from transformers import TrainingArguments, Trainer
-from vit_pytorch import SimpleViT
-from vit_pytorch.efficient import ViT
-from linformer import Linformer
 
 
-device = torch.device('cuda:7' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 class ShapesDataset(torch.utils.data.Dataset):
 
@@ -42,11 +39,14 @@ class ShapesDataset(torch.utils.data.Dataset):
 
         return image, label
 
+
 def save_checkpoint(state, filename):
     torch.save(state, filename)
 
+
 def cosine_annealing(step, total_steps, lr_max, lr_min): 
     return lr_min + (lr_max - lr_min) * 0.5 * (1 + np.cos(step / total_steps * np.pi))
+
 
 def accuracy(output, target, topk=(1,)):
     """
@@ -249,112 +249,8 @@ def main():
     # Choose only one pretraining souce
     assert not (args.pretrained_imagenet and args.pretrained_path)
 
-    if args.model == "vgg16":
-        if not args.evaluate:
-            if args.pretrained_imagenet:
-                model = models.vgg16(pretrained=True)
-            else:
-                model = models.vgg16()
-            features = []
-            for feat in list(model.features):
-                features.append(feat)
-                if isinstance(feat, nn.Conv2d):
-                    features.append(nn.Dropout(p=0.55, inplace=True))
-            
-            model.features = nn.Sequential(*features)
-            model.fc = torch.nn.Linear(512, len(classes))
-        else:
-            model = models.vgg16()
-            model.fc = torch.nn.Linear(512, len(classes))
-
-    elif args.model == "resnet18":
-        if not args.evaluate:
-            if args.pretrained_imagenet:
-                model = models.resnet18(pretrained=True)
-            elif args.pretrained_path:
-                model = models.resnet18()
-                if args.pretrained_path.endswith("FractalDB-10000_res18.pth"):
-                    model.fc = torch.nn.Linear(512, 10000)        
-                elif args.pretrained_path.endswith("FractalDB-1000_res18.pth"):
-                    model.fc = torch.nn.Linear(512, 1000)
-                try:
-                    model.load_state_dict(torch.load(args.pretrained_path))
-                except:
-                    model.load_state_dict(torch.load(args.pretrained_path)["state_dict"])
-            else:
-                model = models.resnet18()
-            model.fc = torch.nn.Linear(512, len(classes))
-        else:
-            model = models.resnet18()
-            model.fc = torch.nn.Linear(512, len(classes))
-
-    elif args.model == "resnet50":
-        if not args.evaluate:
-            if args.pretrained_imagenet:
-                model = models.resnet50(pretrained=True)
-            elif args.pretrained_path:
-                raise Exception('Not implemented')
-                # model = models.resnet50()
-                # if args.pretrained_path.endswith("FractalDB-10000_res18.pth"):
-                #     model.fc = torch.nn.Linear(2048, 10000)        
-                # elif args.pretrained_path.endswith("FractalDB-1000_res18.pth"):
-                #     model.fc = torch.nn.Linear(2048, 1000)
-                # try:
-                #     model.load_state_dict(torch.load(args.pretrained_path))
-                # except:
-                #     model.load_state_dict(torch.load(args.pretrained_path)["state_dict"])
-            else:
-                model = models.resnet50()
-            model.fc = torch.nn.Linear(2048, len(classes))
-        else:
-            model = models.resnet50()
-            model.fc = torch.nn.Linear(2048, len(classes))
-
-    elif args.model == "mlpmixer":  # work in progress
-        if not args.evaluate:
-            if args.pretrained_imagenet:
-                if args.pretrained_path:  # assumes imagenet1k
-                    model = MLPMixer(num_classes=1000)
-                    model.load_from(np.load(args.pretrained_path))
-                    # re-initialize final layer
-                    model.layers[-1] = nn.Linear(model.layers[-1].in_features, len(classes))
-        else:
-            model = MLPMixer(num_classes=len(classes))
-
-    elif args.model == "vit":  
-        # TODO(ltang): think carefully about which ViT to base off of
-        
-        efficient_transformer = Linformer(
-            dim=128,
-            # seq_len=49+1,  # 7x7 patches + 1 cls-token
-            seq_len=14*14+1,  # 14x14 patches + 1 cls-token
-            depth=12,
-            heads=8,
-            k=64
-        )
-
-        model = ViT(
-            dim=128,
-            image_size=224,
-            patch_size=16,
-            num_classes=len(classes),
-            transformer=efficient_transformer,
-            channels=3,
-        ).to(device)
-
-        # model = SimpleViT(
-        #     image_size = 224,
-        #     patch_size = 32,
-        #     num_classes = len(classes),
-        #     dim = 1024,
-        #     depth = 6,
-        #     heads = 16,
-        #     mlp_dim = 2048
-        # )
-
-    else:
-        raise Exception(f"{args.model} is not a supported model")
-
+    
+    model = get_model(args, classes)
     model = model.to(device)
     # model = torch.nn.DataParallel(model)
     criterion = nn.CrossEntropyLoss().to(device)
@@ -389,7 +285,7 @@ def main():
                 transforms.RandomHorizontalFlip(),
                 transforms.RandomRotation(25),
                 transforms.ToTensor(),
-                transforms.Normalize(whole_mean, whole_std) 
+                transforms.Normalize(whole_mean, whole_std)
             ])
         
             tub_test_transforms = transforms.Compose([
