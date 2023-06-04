@@ -326,7 +326,8 @@ def main():
         
         efficient_transformer = Linformer(
             dim=128,
-            seq_len=49+1,  # 7x7 patches + 1 cls-token
+            # seq_len=49+1,  # 7x7 patches + 1 cls-token
+            seq_len=14*14+1,  # 14x14 patches + 1 cls-token
             depth=12,
             heads=8,
             k=64
@@ -335,7 +336,7 @@ def main():
         model = ViT(
             dim=128,
             image_size=224,
-            patch_size=32,
+            patch_size=16,
             num_classes=len(classes),
             transformer=efficient_transformer,
             channels=3,
