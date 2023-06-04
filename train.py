@@ -12,6 +12,8 @@ from torchvision import models, transforms
 from tqdm import tqdm
 from transformers import TrainingArguments, Trainer
 from vit_pytorch import SimpleViT
+from vit_pytorch.efficient import ViT
+from linformer import Linformer
 
 
 device = torch.device('cuda:7' if torch.cuda.is_available() else 'cpu')
@@ -322,15 +324,32 @@ def main():
     elif args.model == "vit":  
         # TODO(ltang): think carefully about which ViT to base off of
         
-        model = SimpleViT(
-            image_size = 224,
-            patch_size = 32,
-            num_classes = len(classes),
-            dim = 1024,
-            depth = 6,
-            heads = 16,
-            mlp_dim = 2048
+        efficient_transformer = Linformer(
+            dim=128,
+            seq_len=49+1,  # 7x7 patches + 1 cls-token
+            depth=12,
+            heads=8,
+            k=64
         )
+
+        model = ViT(
+            dim=128,
+            image_size=224,
+            patch_size=32,
+            num_classes=len(classes),
+            transformer=efficient_transformer,
+            channels=3,
+        ).to(device)
+
+        # model = SimpleViT(
+        #     image_size = 224,
+        #     patch_size = 32,
+        #     num_classes = len(classes),
+        #     dim = 1024,
+        #     depth = 6,
+        #     heads = 16,
+        #     mlp_dim = 2048
+        # )
 
     else:
         raise Exception(f"{args.model} is not a supported model")
