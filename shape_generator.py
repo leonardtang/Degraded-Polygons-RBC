@@ -1,3 +1,7 @@
+"""
+Script to generate dataset of shapes with and without
+"""
+
 import argparse
 import cv2
 import math
@@ -8,6 +12,7 @@ from tqdm import tqdm
 
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
+
 CIRCLE = 1
 classes = {
     CIRCLE: 0, 
@@ -125,7 +130,7 @@ if __name__ == "__main__":
     parser.add_argument("--min-radius-div", "-m", default=5, type=float)
     parser.add_argument("--remove-prop", "-r", default=0.3, type=float)
     parser.add_argument("--thickness", "-t", default=2, type=int)
-    parser.add_argument("--save-dir", "-d", default="./images/shapes_1000", type=str)
+    parser.add_argument("--save-dir", "-d", default="./images224/shapes", type=str)
     parser.add_argument("--generate-whole", "-w", action="store_true")
 
     args = parser.parse_args()
