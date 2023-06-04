@@ -4,13 +4,14 @@ import torch
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from mlp_mixer_pytorch import MLPMixer
 from PIL import Image
 from torch import nn
 from torchvision import models, transforms
 from tqdm import tqdm
 from shape_generator import classes
 
-device = torch.device('cuda:2' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda:7' if torch.cuda.is_available() else 'cpu')
 
 class ShapesDataset(torch.utils.data.Dataset):
 
@@ -59,6 +60,8 @@ def accuracy(output, target, topk=(1,)):
             correct_k = correct[:k].reshape(-1).float().sum(0, keepdim=True)
             res.append(correct_k.mul_(100.0 / batch_size))
 
+        res.append(torch.max(output, 1)[1])
+
         return res
 
 
@@ -84,7 +87,7 @@ def train(train_loader, model, criterion, optimizer):
         output, target = logits, y 
         # input()
 
-        acc1, acc5 = accuracy(output, target, topk=(1, 5))
+        acc1, acc5, _ = accuracy(output, target, topk=(1, 5))
         train_loss += loss.item()
         top_1 += acc1[0]
         top_5 += acc5[0]
@@ -96,13 +99,15 @@ def train(train_loader, model, criterion, optimizer):
     return train_loss / len(train_loader), top_1 / len(train_loader), top_5 / len(train_loader)
 
 
-def val(test_loader, model, criterion, args):
+def val(test_loader, model, criterion):
 
     model.eval()
     top_1, top_5 = 0, 0
     val_loss = 0.0
+    per_class_acc = [0 for _ in classes]
 
     with torch.no_grad():
+        confusion_matrix = torch.zeros(len(classes), len(classes))
         for _, (images, target) in enumerate(test_loader):
             images = images.to(device)
             target = target.to(device)
@@ -110,12 +115,26 @@ def val(test_loader, model, criterion, args):
             output = model(images)
             loss = criterion(output, target)
             
-            acc1, acc5 = accuracy(output, target, topk=(1, 5))
+            acc1, acc5, preds = accuracy(output, target, topk=(1, 5))
             val_loss += loss.item()
             top_1 += acc1[0]
             top_5 += acc5[0]
 
-    return val_loss/ len(test_loader), top_1 / len(test_loader), top_5 / len(test_loader)
+            ### DEBUGGING CODE
+            # for i, t in enumerate(target):
+            #     if preds[i] == t: continue
+            #     if t == 4:  
+            #         print("Pred instead of 4", preds[i])
+            #     if t == 5:  
+            #         print("Pred instead of 5", preds[i])
+            #     if t == 6:  
+            #         print("Pred instead of 6", preds[i])
+
+            for t, p in zip(torch.flatten(target), torch.flatten(preds)):
+                confusion_matrix[t.long(), p.long()] += 1
+
+    per_class_acc = confusion_matrix.diag()/confusion_matrix.sum(1)
+    return val_loss/ len(test_loader), top_1 / len(test_loader), top_5 / len(test_loader), per_class_acc.tolist()
 
 
 def dataset_stats(args, metadata_path):
@@ -226,32 +245,79 @@ def main():
     assert not (args.pretrained_imagenet and args.pretrained_path)
 
     if args.model == "vgg16":
-        if args.pretrained_imagenet:
-            model = models.vgg16(pretrained=True)
+        if not args.evaluate:
+            if args.pretrained_imagenet:
+                model = models.vgg16(pretrained=True)
+            else:
+                model = models.vgg16()
+            features = []
+            for feat in list(model.features):
+                features.append(feat)
+                if isinstance(feat, nn.Conv2d):
+                    features.append(nn.Dropout(p=0.55, inplace=True))
+            
+            model.features = nn.Sequential(*features)
+            model.fc = torch.nn.Linear(512, len(classes))
         else:
             model = models.vgg16()
-        features = []
-        for feat in list(model.features):
-            features.append(feat)
-            if isinstance(feat, nn.Conv2d):
-                features.append(nn.Dropout(p=0.55, inplace=True))
-        
-        model.features = nn.Sequential(*features)
-        model.fc = torch.nn.Linear(512, len(classes))
+            model.fc = torch.nn.Linear(512, len(classes))
 
     elif args.model == "resnet18":
-        if args.pretrained_imagenet:
-            model = models.resnet18(pretrained=True)
-        elif args.pretrained_path:
-            model = models.resnet18()
-            if args.pretrained_path.endswith("FractalDB-10000_res18.pth"):
-                model.fc = torch.nn.Linear(512, 10000)        
-            elif args.pretrained_path.endswith("FractalDB-1000_res18.pth"):
-                model.fc = torch.nn.Linear(512, 1000)
-            model.load_state_dict(torch.load(args.pretrained_path))
+        if not args.evaluate:
+            if args.pretrained_imagenet:
+                model = models.resnet18(pretrained=True)
+            elif args.pretrained_path:
+                model = models.resnet18()
+                if args.pretrained_path.endswith("FractalDB-10000_res18.pth"):
+                    model.fc = torch.nn.Linear(512, 10000)        
+                elif args.pretrained_path.endswith("FractalDB-1000_res18.pth"):
+                    model.fc = torch.nn.Linear(512, 1000)
+                try:
+                    model.load_state_dict(torch.load(args.pretrained_path))
+                except:
+                    model.load_state_dict(torch.load(args.pretrained_path)["state_dict"])
+            else:
+                model = models.resnet18()
+            model.fc = torch.nn.Linear(512, len(classes))
         else:
             model = models.resnet18()
-        model.fc = torch.nn.Linear(512, len(classes))
+            model.fc = torch.nn.Linear(512, len(classes))
+
+    elif args.model == "resnet50":
+        if not args.evaluate:
+            if args.pretrained_imagenet:
+                model = models.resnet50(pretrained=True)
+            elif args.pretrained_path:
+                raise Exception('Not implemented')
+                # model = models.resnet50()
+                # if args.pretrained_path.endswith("FractalDB-10000_res18.pth"):
+                #     model.fc = torch.nn.Linear(2048, 10000)        
+                # elif args.pretrained_path.endswith("FractalDB-1000_res18.pth"):
+                #     model.fc = torch.nn.Linear(2048, 1000)
+                # try:
+                #     model.load_state_dict(torch.load(args.pretrained_path))
+                # except:
+                #     model.load_state_dict(torch.load(args.pretrained_path)["state_dict"])
+            else:
+                model = models.resnet50()
+            model.fc = torch.nn.Linear(2048, len(classes))
+        else:
+            model = models.resnet50()
+            model.fc = torch.nn.Linear(2048, len(classes))
+
+    elif args.model == "mlpmixer":  # work in progress
+        if not args.evaluate:
+            if args.pretrained_imagenet:
+                if args.pretrained_path:  # assumes imagenet1k
+                    model = MLPMixer(num_classes=1000)
+                    model.load_from(np.load(args.pretrained_path))
+                    # re-initialize final layer
+                    model.layers[-1] = nn.Linear(model.layers[-1].in_features, len(classes))
+        else:
+            model = MLPMixer(num_classes=len(classes))
+
+    elif args.model == "vit":  # work in progress
+        pass
 
     else:
         raise Exception(f"{args.model} is not a supported model")
@@ -282,7 +348,7 @@ def main():
 
     ### Main training loop
     if not args.evaluate:
-        if args.data.startswith("./images/shapes"):
+        if args.data.startswith("./images224/shapes"):
             whole_mean, whole_std = dataset_stats(args, "metadata_whole.csv")
             tub_train_transforms = transforms.Compose([
                 # transforms.RandomResizedCrop(224),
@@ -355,8 +421,8 @@ def main():
 
             train_losses_avg, train_top1_avg, train_top5_avg = train(train_loader, model, criterion, optimizer)
             print('Train * Acc@1 {top1:.3f} Acc@5 {top5:.3f}'.format(top1=train_top1_avg, top5=train_top5_avg))
-            val_losses_avg, val_top1_avg, val_top5_avg = val(val_loader, model, criterion, args)
-            print('Val * Acc@1 {top1:.3f} Acc@5 {top5:.3f}'.format(top1=val_top1_avg, top5=val_top5_avg))
+            val_losses_avg, val_top1_avg, val_top5_avg, val_per_class_acc = val(val_loader, model, criterion)
+            print('Val * Acc@1 {top1:.3f} Acc@5 {top5:.3f} Per-Class Acc {per_class}'.format(top1=val_top1_avg, top5=val_top5_avg, per_class=["{0:0.3f}".format(i) for i in val_per_class_acc]))
 
             if lin_scheduler:
                 lin_scheduler.step(val_losses_avg)
@@ -376,8 +442,8 @@ def main():
 
         best_cp = torch.load(save_file)
         model.load_state_dict(best_cp["state_dict"])
-        _, test_top1_avg, test_top5_avg = val(test_loader, model, criterion, args)
-        print(f'Test * Acc@1 {test_top1_avg:.3f} Acc@5 {test_top5_avg:.3f}')
+        _, test_top1_avg, test_top5_avg, test_per_class_acc = val(test_loader, model, criterion)
+        print(f'Test * Acc@1 {test_top1_avg:.3f} Acc@5 {test_top5_avg:.3f} Per-Class Acc {["{0:0.3f}".format(i) for i in test_per_class_acc]}')
 
         # Plot training curves
         df = pd.read_csv(train_log, header=None)
@@ -401,16 +467,19 @@ def main():
 
 
     ### Evaluate on no corner and no edge datasets
-    best_cp = torch.load(save_file)
-    model.load_state_dict(best_cp["state_dict"])
+    if not args.evaluate:
+        best_cp = torch.load(save_file)
+        model.load_state_dict(best_cp["state_dict"])
+    else:
+        model.load_state_dict(torch.load(args.pretrained_path)["state_dict"])
 
     noedges_loader = get_noedges_loader(args)
-    _, test_top1_avg, test_top5_avg = val(noedges_loader, model, criterion, args)
-    print(f'No Edges * Acc@1 {test_top1_avg:.3f} Acc@5 {test_top5_avg:.3f}')
+    _, test_top1_avg, test_top5_avg, test_per_class_acc = val(noedges_loader, model, criterion)
+    print(f'No Edges * Acc@1 {test_top1_avg:.3f} Acc@5 {test_top5_avg:.3f} Per-Class Acc {["{0:0.3f}".format(i) for i in test_per_class_acc]}')
 
     nocorners_loader = get_nocorners_loader(args)
-    _, test_top1_avg, test_top5_avg = val(nocorners_loader, model, criterion, args)
-    print(f'No Corners * Acc@1 {test_top1_avg:.3f} Acc@5 {test_top5_avg:.3f}')
+    _, test_top1_avg, test_top5_avg, test_per_class_acc = val(nocorners_loader, model, criterion)
+    print(f'No Corners * Acc@1 {test_top1_avg:.3f} Acc@5 {test_top5_avg:.3f} Per-Class Acc {["{0:0.3f}".format(i) for i in test_per_class_acc]}')
     
 if __name__ == "__main__":
     main()
