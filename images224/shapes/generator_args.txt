@@ -4,4 +4,4 @@ min_radius_div=5
 remove_prop=0.3
 thickness=2
 save_dir=./images224/shapes
-generate_whole=False
+generate_whole=True

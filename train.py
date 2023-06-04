@@ -4,12 +4,15 @@ import torch
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from mlp_mixer_pytorch import MLPMixer
+# from models.modeling import MlpMixer, CONFIGS
+from shape_generator import classes
 from PIL import Image
 from torch import nn
 from torchvision import models, transforms
 from tqdm import tqdm
-from shape_generator import classes
+from transformers import TrainingArguments, Trainer
+from vit_pytorch import SimpleViT
+
 
 device = torch.device('cuda:7' if torch.cuda.is_available() else 'cpu')
 
@@ -223,7 +226,7 @@ def main():
         description="Trains classifier on shapes dataset", 
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
-    parser.add_argument("--data", "-d", type=str, default="./images/shapes")
+    parser.add_argument("--data", "-d", type=str, default="./images224/shapes")
     parser.add_argument("--model", "-m", type=str, default="resnet18")
     parser.add_argument("--num-workers", "-w", type=int, default=16)
     parser.add_argument("--batch-size", "-b", type=int, default=512)
@@ -316,8 +319,18 @@ def main():
         else:
             model = MLPMixer(num_classes=len(classes))
 
-    elif args.model == "vit":  # work in progress
-        pass
+    elif args.model == "vit":  
+        # TODO(ltang): think carefully about which ViT to base off of
+        
+        model = SimpleViT(
+            image_size = 224,
+            patch_size = 32,
+            num_classes = len(classes),
+            dim = 1024,
+            depth = 6,
+            heads = 16,
+            mlp_dim = 2048
+        )
 
     else:
         raise Exception(f"{args.model} is not a supported model")
