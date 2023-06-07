@@ -82,16 +82,9 @@ def train(train_loader, model, criterion, optimizer):
         x = images.to(device)
         y = target.to(device)
 
-        # print(f'**********IMAGE: {x[0]}')
-        # print(f'**********TARGET: {y}')
-        # print(f'**********TARGET TYPE: {type(y)}')
-
         logits = model(x)
-        # print(f'**********LOGITS: {logits}')
         loss = criterion(logits, y)
-        # print(f'**********LOSS: {loss}')
         output, target = logits, y 
-        # input()
 
         acc1, acc5, _ = accuracy(output, target, topk=(1, 5))
         train_loss += loss.item()
@@ -125,16 +118,6 @@ def val(test_loader, model, criterion):
             val_loss += loss.item()
             top_1 += acc1[0]
             top_5 += acc5[0]
-
-            ### DEBUGGING CODE
-            # for i, t in enumerate(target):
-            #     if preds[i] == t: continue
-            #     if t == 4:  
-            #         print("Pred instead of 4", preds[i])
-            #     if t == 5:  
-            #         print("Pred instead of 5", preds[i])
-            #     if t == 6:  
-            #         print("Pred instead of 6", preds[i])
 
             for t, p in zip(torch.flatten(target), torch.flatten(preds)):
                 confusion_matrix[t.long(), p.long()] += 1
@@ -250,7 +233,6 @@ def main():
 
     # Choose only one pretraining souce
     assert not (args.pretrained_imagenet and args.pretrained_path)
-
     
     model = get_model(args, classes)
     model = model.to(device)
@@ -261,32 +243,26 @@ def main():
         args.learning_rate,
         momentum=args.momentum,
         weight_decay=args.decay,
-        # nesterov=True
     )
 
     sub_save_dir = os.path.join(args.save_dir, args.data.split("/")[-1])
     os.makedirs(sub_save_dir, exist_ok=True)
     print("\nSub Save Dir", sub_save_dir)
     
-    # save_suffix = ""
-    # if args.pretrained_imagenet:
-    #     save_suffix = "imagenet"
-    # elif args.pretrained_path:
-    #     save_suffix = args.pretrained_path.split("/")[-1].split(".")[0]
+    save_suffix = ""
+    if args.pretrained_imagenet:
+        save_suffix = "imagenet"
+    elif args.pretrained_path:
+        save_suffix = args.pretrained_path.split("/")[-1].split(".")[0]
 
-    # save_file = os.path.join(sub_save_dir, f"final_model_{args.model}.pth")
-    save_file = os.path.join(sub_save_dir, f"final_model_resnet18_30p_nocorner.pth")
+    save_file = os.path.join(sub_save_dir, f"final_model_{args.model}.pth")
     print("\nSave File:", save_file)
 
     ### Main training loop
     if not args.evaluate:
         if args.data.startswith("./images224/shapes") or args.data.startswith("images224/shapes"):
-            # whole_mean, whole_std = dataset_stats(args, "metadata_whole.csv")
-            # whole_mean, whole_std = dataset_stats(args, "metadata_noedges.csv")
-            whole_mean, whole_std = dataset_stats(args, "metadata_nocorners.csv")
+            whole_mean, whole_std = dataset_stats(args, "metadata_whole.csv")
             tub_train_transforms = transforms.Compose([
-                # transforms.RandomResizedCrop(224),
-                # transforms.Resize(224), 
                 transforms.RandomHorizontalFlip(),
                 transforms.RandomRotation(25),
                 transforms.ToTensor(),
@@ -294,23 +270,15 @@ def main():
             ])
         
             tub_test_transforms = transforms.Compose([
-                # transforms.CenterCrop(224),
-                # transforms.Resize(224), 
                 transforms.ToTensor(),
                 transforms.Normalize(whole_mean, whole_std)
             ])
 
             # Initialize train, val, test sets
             # Train on whole images, and see ability to generalize to edge/corner removed images
-            # train_data = ShapesDataset(metadata='metadata_whole.csv', data_dir = args.data, transform = tub_train_transforms)
-            # val_data = ShapesDataset(metadata='metadata_whole.csv', data_dir = args.data, transform = tub_test_transforms)
-            # test_data = ShapesDataset(metadata='metadata_whole.csv', data_dir = args.data, transform = tub_test_transforms)
-            # train_data = ShapesDataset(metadata='metadata_noedges.csv', data_dir = args.data, transform = tub_train_transforms)
-            # val_data = ShapesDataset(metadata='metadata_noedges.csv', data_dir = args.data, transform = tub_test_transforms)
-            # test_data = ShapesDataset(metadata='metadata_noedges.csv', data_dir = args.data, transform = tub_test_transforms)
-            train_data = ShapesDataset(metadata='metadata_nocorners.csv', data_dir = args.data, transform = tub_train_transforms)
-            val_data = ShapesDataset(metadata='metadata_nocorners.csv', data_dir = args.data, transform = tub_test_transforms)
-            test_data = ShapesDataset(metadata='metadata_nocorners.csv', data_dir = args.data, transform = tub_test_transforms)
+            train_data = ShapesDataset(metadata='metadata_whole.csv', data_dir = args.data, transform = tub_train_transforms)
+            val_data = ShapesDataset(metadata='metadata_whole.csv', data_dir = args.data, transform = tub_test_transforms)
+            test_data = ShapesDataset(metadata='metadata_whole.csv', data_dir = args.data, transform = tub_test_transforms)
 
             # Get train, val, test splits
             train_size = 0.6
@@ -348,10 +316,6 @@ def main():
             num_workers=args.num_workers, 
             shuffle=True)
         
-        # if args.model in ["resnet18", "resnet50", "vgg19"]:
-        #     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)
-        # elif args.model in ["mlpmixer"]:
-        #     scheduler = WarmupCosineSchedule(optimizer, warmup_steps=args.warmup_steps, t_total=args.epochs)
 
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)
         

@@ -32,7 +32,6 @@ def main(args):
     target_layers = [model.layer4[-1]]
     cam = GradCAM(model=model, target_layers=target_layers, use_cuda=args.use_cuda)
     
-    # TODO: view GradCAM per class activiations
     num_indices = len(get_noedges_loader(args, sampler=None)) * args.batch_size
     sampler_a = list(SubsetRandomSampler(list(range(num_indices))))
     sampler_b = copy.deepcopy(sampler_a)
