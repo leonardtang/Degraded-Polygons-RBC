@@ -87,6 +87,7 @@ def main(classes, num_per_class, img_size, min_radius, thickness, bg_color, fg_c
         
                 if generate_whole:
                     cv2.imwrite(f'{save_dir}/pngs/{num_sides}_{k}_whole.png', img)
+                    continue
                 
                 img_nocorners = img.copy()
                 for corner_x, corner_y in points:

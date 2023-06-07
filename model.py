@@ -26,6 +26,7 @@ def get_mixer_b16_config():
     return config
 
 def get_model(args, classes):
+    
     if args.model == "vgg16":
         if not args.evaluate:
             if args.pretrained_imagenet:
@@ -87,14 +88,12 @@ def get_model(args, classes):
             model = models.resnet50()
             model.fc = torch.nn.Linear(2048, len(classes))
 
-    elif args.model == "mlpmixer":  # work in progress
+    elif args.model == "mlpmixer":  
         config = get_mixer_b16_config()
         if not args.evaluate:
-            if args.pretrained_path:  # assumes imagenet1k
+            if args.pretrained_path:
                 model = MLPMixer(config, num_classes=1000)
                 model.load_from(np.load(args.pretrained_path))
-                # re-initialize final layer
-                # model.layers[-1] = nn.Linear(model.layers[-1].in_features, len(classes))
                 model.head = nn.Linear(config.hidden_dim, len(classes), bias=True)
             else:
                 model = MLPMixer(config, num_classes=len(classes))
@@ -107,7 +106,6 @@ def get_model(args, classes):
             model = models.vit_b_16(weights='IMAGENET1K_V1')
             # re-initialize final layer
             model.heads.head = nn.Linear(model.heads.head.in_features, len(classes), bias=True)
-            
         else:
             model = models.vit_b_16(num_classes=len(classes))
         
