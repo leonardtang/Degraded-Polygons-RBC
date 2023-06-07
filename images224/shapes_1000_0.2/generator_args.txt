@@ -1,0 +1,7 @@
+num_shapes_per_class=1000
+img_size=224
+min_radius_div=5
+remove_prop=0.2
+thickness=2
+save_dir=images224/shapes_1000_0.2
+generate_whole=False

@@ -11,9 +11,10 @@ from torch import nn
 from torchvision import models, transforms
 from tqdm import tqdm
 from transformers import TrainingArguments, Trainer
+from scheduler import WarmupLinearSchedule, WarmupCosineSchedule
 
 
-device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
 
 class ShapesDataset(torch.utils.data.Dataset):
 
@@ -236,12 +237,13 @@ def main():
     parser.add_argument("--pretrained-path", "-pp", type=str)
     parser.add_argument("--print-freq", "-f", type=int, default=10)
     parser.add_argument("--epochs", default=120, type=int)
-    parser.add_argument("--save-dir", type=str, default="./checkpoints")
+    parser.add_argument("--save-dir", type=str, default="./checkpoints224")
     # Hyperparams adapted from http://cs231n.stanford.edu/reports/2017/pdfs/420.pdf
     parser.add_argument("--learning-rate", "-lr", type=float, default=0.01, help="Initial learning rate.")
     parser.add_argument("--momentum", type=float, default=0.9)
     parser.add_argument("--decay", "-wd", type=float, default=1e-4)
     parser.add_argument("--evaluate", "-e", action="store_true")
+    parser.add_argument("--warmup_steps", default=50, type=int, help="Step of training to perform learning rate warmup for.")
     args = parser.parse_args()
     print("*** Arguments: ***")
     print(" ".join(f'{k}={v}' for k, v in vars(args).items()))
@@ -266,19 +268,22 @@ def main():
     os.makedirs(sub_save_dir, exist_ok=True)
     print("\nSub Save Dir", sub_save_dir)
     
-    save_suffix = ""
-    if args.pretrained_imagenet:
-        save_suffix = "imagenet"
-    elif args.pretrained_path:
-        save_suffix = args.pretrained_path.split("/")[-1].split(".")[0]
+    # save_suffix = ""
+    # if args.pretrained_imagenet:
+    #     save_suffix = "imagenet"
+    # elif args.pretrained_path:
+    #     save_suffix = args.pretrained_path.split("/")[-1].split(".")[0]
 
-    save_file = os.path.join(sub_save_dir, f"final_model_{save_suffix}.pth")
+    # save_file = os.path.join(sub_save_dir, f"final_model_{args.model}.pth")
+    save_file = os.path.join(sub_save_dir, f"final_model_resnet18_30p_nocorner.pth")
     print("\nSave File:", save_file)
 
     ### Main training loop
     if not args.evaluate:
-        if args.data.startswith("./images224/shapes"):
-            whole_mean, whole_std = dataset_stats(args, "metadata_whole.csv")
+        if args.data.startswith("./images224/shapes") or args.data.startswith("images224/shapes"):
+            # whole_mean, whole_std = dataset_stats(args, "metadata_whole.csv")
+            # whole_mean, whole_std = dataset_stats(args, "metadata_noedges.csv")
+            whole_mean, whole_std = dataset_stats(args, "metadata_nocorners.csv")
             tub_train_transforms = transforms.Compose([
                 # transforms.RandomResizedCrop(224),
                 # transforms.Resize(224), 
@@ -297,9 +302,15 @@ def main():
 
             # Initialize train, val, test sets
             # Train on whole images, and see ability to generalize to edge/corner removed images
-            train_data = ShapesDataset(metadata='metadata_whole.csv', data_dir = args.data, transform = tub_train_transforms)
-            val_data = ShapesDataset(metadata='metadata_whole.csv', data_dir = args.data, transform = tub_test_transforms)
-            test_data = ShapesDataset(metadata='metadata_whole.csv', data_dir = args.data, transform = tub_test_transforms)
+            # train_data = ShapesDataset(metadata='metadata_whole.csv', data_dir = args.data, transform = tub_train_transforms)
+            # val_data = ShapesDataset(metadata='metadata_whole.csv', data_dir = args.data, transform = tub_test_transforms)
+            # test_data = ShapesDataset(metadata='metadata_whole.csv', data_dir = args.data, transform = tub_test_transforms)
+            # train_data = ShapesDataset(metadata='metadata_noedges.csv', data_dir = args.data, transform = tub_train_transforms)
+            # val_data = ShapesDataset(metadata='metadata_noedges.csv', data_dir = args.data, transform = tub_test_transforms)
+            # test_data = ShapesDataset(metadata='metadata_noedges.csv', data_dir = args.data, transform = tub_test_transforms)
+            train_data = ShapesDataset(metadata='metadata_nocorners.csv', data_dir = args.data, transform = tub_train_transforms)
+            val_data = ShapesDataset(metadata='metadata_nocorners.csv', data_dir = args.data, transform = tub_test_transforms)
+            test_data = ShapesDataset(metadata='metadata_nocorners.csv', data_dir = args.data, transform = tub_test_transforms)
 
             # Get train, val, test splits
             train_size = 0.6
@@ -337,7 +348,12 @@ def main():
             num_workers=args.num_workers, 
             shuffle=True)
         
-        lin_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)
+        # if args.model in ["resnet18", "resnet50", "vgg19"]:
+        #     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)
+        # elif args.model in ["mlpmixer"]:
+        #     scheduler = WarmupCosineSchedule(optimizer, warmup_steps=args.warmup_steps, t_total=args.epochs)
+
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)
         
         train_log = os.path.join(sub_save_dir, "training_log.csv")
         with open(train_log, 'w+'): pass
@@ -353,8 +369,8 @@ def main():
             val_losses_avg, val_top1_avg, val_top5_avg, val_per_class_acc = val(val_loader, model, criterion)
             print('Val * Acc@1 {top1:.3f} Acc@5 {top5:.3f} Per-Class Acc {per_class}'.format(top1=val_top1_avg, top5=val_top5_avg, per_class=["{0:0.3f}".format(i) for i in val_per_class_acc]))
 
-            if lin_scheduler:
-                lin_scheduler.step(val_losses_avg)
+            if scheduler:
+                scheduler.step(val_losses_avg)
           
             with open(train_log, "a") as f:
                 f.write(f'{(epoch + 1)},{train_losses_avg},{train_top1_avg},{train_top5_avg},{val_losses_avg},{val_top1_avg},{val_top5_avg}\n')
@@ -401,14 +417,31 @@ def main():
         model.load_state_dict(best_cp["state_dict"])
     else:
         model.load_state_dict(torch.load(args.pretrained_path)["state_dict"])
+    
+    if args.data.endswith("shapes/"):
+        whole_mean, whole_std = dataset_stats(args, "metadata_whole.csv")
+        tub_test_transforms = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize(whole_mean, whole_std)
+        ])
+        test_data = ShapesDataset(metadata='metadata_whole.csv', data_dir = args.data, transform = tub_test_transforms)
+        test_loader = torch.utils.data.DataLoader(
+            test_data, 
+            batch_size=args.batch_size,
+            num_workers=args.num_workers, 
+            shuffle=True
+        )
+        _, test_top1_avg, test_top5_avg, test_per_class_acc = val(test_loader, model, criterion)
+        print(f'Test * Acc@1 {test_top1_avg:.3f} Acc@5 {test_top5_avg:.3f} Per-Class Acc {["{0:0.3f}".format(i) for i in test_per_class_acc]}')
+    
+    else:
+        noedges_loader = get_noedges_loader(args)
+        _, test_top1_avg, test_top5_avg, test_per_class_acc = val(noedges_loader, model, criterion)
+        print(f'No Edges * Acc@1 {test_top1_avg:.3f} Acc@5 {test_top5_avg:.3f} Per-Class Acc {["{0:0.3f}".format(i) for i in test_per_class_acc]}')
 
-    noedges_loader = get_noedges_loader(args)
-    _, test_top1_avg, test_top5_avg, test_per_class_acc = val(noedges_loader, model, criterion)
-    print(f'No Edges * Acc@1 {test_top1_avg:.3f} Acc@5 {test_top5_avg:.3f} Per-Class Acc {["{0:0.3f}".format(i) for i in test_per_class_acc]}')
-
-    nocorners_loader = get_nocorners_loader(args)
-    _, test_top1_avg, test_top5_avg, test_per_class_acc = val(nocorners_loader, model, criterion)
-    print(f'No Corners * Acc@1 {test_top1_avg:.3f} Acc@5 {test_top5_avg:.3f} Per-Class Acc {["{0:0.3f}".format(i) for i in test_per_class_acc]}')
+        nocorners_loader = get_nocorners_loader(args)
+        _, test_top1_avg, test_top5_avg, test_per_class_acc = val(nocorners_loader, model, criterion)
+        print(f'No Corners * Acc@1 {test_top1_avg:.3f} Acc@5 {test_top5_avg:.3f} Per-Class Acc {["{0:0.3f}".format(i) for i in test_per_class_acc]}')
     
 if __name__ == "__main__":
     main()
