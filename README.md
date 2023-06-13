@@ -22,10 +22,10 @@ python3 shape_generator.py --num-shapes-per-class, -n <N>
 
 Parameters:
 - ```N``` &mdash; number of shapes to generate per class (default: 1000)
-- ```S``` -- length of square images (default: 224)
-- ```M``` -- minimum radius of polygon circumcircles (default: 5)
-- ```R``` -- proportion of polygons to remove (default: 0.3)
-- ```T``` -- thickness of polygons (default: 2)
-- ```D``` -- save directory of dataset (default: './images224/shapes')
+- ```S``` &mdash; length of square images (default: 224)
+- ```M``` &mdash; minimum radius of polygon circumcircles (default: 5)
+- ```R``` &mdash; proportion of polygons to remove (default: 0.3)
+- ```T``` &mdash; thickness of polygons (default: 2)
+- ```D``` &mdash; save directory of dataset (default: './images224/shapes')
 
 Use the ```--generate-whole``` flag to save non-degraded polygons
