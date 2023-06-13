@@ -1,5 +1,11 @@
 # Degraded-Polygons-RBC
 
+Repository for the paper
+
+[Degraded Polygons Raise Fundamental Questions of Neural Network Perception](https://arxiv.org/abs/2306.04955)
+
+by Leonard Tang and Dan Ley
+
 ### Shape Generation
 
 Datasets of degraded polygons can be generated using the following command
