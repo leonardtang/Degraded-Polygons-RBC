@@ -21,7 +21,7 @@ python3 shape_generator.py --num-shapes-per-class, -n <N>
 ```
 
 Parameters:
-- ```N``` -- number of shapes to generate per class (default: 1000)
+- ```N``` &mdash; number of shapes to generate per class (default: 1000)
 - ```S``` -- length of square images (default: 224)
 - ```M``` -- minimum radius of polygon circumcircles (default: 5)
 - ```R``` -- proportion of polygons to remove (default: 0.3)
