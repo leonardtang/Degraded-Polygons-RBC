@@ -10,11 +10,9 @@ from PIL import Image
 from torch import nn
 from torchvision import models, transforms
 from tqdm import tqdm
-from transformers import TrainingArguments, Trainer
-from scheduler import WarmupLinearSchedule, WarmupCosineSchedule
 
 
-device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class ShapesDataset(torch.utils.data.Dataset):
 
@@ -224,6 +222,7 @@ def main():
     # Hyperparams adapted from http://cs231n.stanford.edu/reports/2017/pdfs/420.pdf
     parser.add_argument("--learning-rate", "-lr", type=float, default=0.01, help="Initial learning rate.")
     parser.add_argument("--momentum", type=float, default=0.9)
+    parser.add_argument("--seed", type=int, default=0, help="Random seed used before trainloader. Note that this does not fix the training process- it currently serves as a way to index model results (and technically fix the first batch).")
     parser.add_argument("--decay", "-wd", type=float, default=1e-4)
     parser.add_argument("--evaluate", "-e", action="store_true")
     parser.add_argument("--warmup_steps", default=50, type=int, help="Step of training to perform learning rate warmup for.")
@@ -255,7 +254,7 @@ def main():
     elif args.pretrained_path:
         save_suffix = args.pretrained_path.split("/")[-1].split(".")[0]
 
-    save_file = os.path.join(sub_save_dir, f"final_model_{args.model}.pth")
+    save_file = os.path.join(sub_save_dir, f"final_model_{args.model}_seed_{args.seed}.pth")
     print("\nSave File:", save_file)
 
     ### Main training loop
@@ -298,6 +297,7 @@ def main():
         else:
             raise Exception(f"{args.data} is not a supported dataset")
 
+        torch.manual_seed(args.seed)
         train_loader = torch.utils.data.DataLoader(
             train_data, 
             batch_size=args.batch_size,
@@ -382,7 +382,7 @@ def main():
     else:
         model.load_state_dict(torch.load(args.pretrained_path)["state_dict"])
     
-    if args.data.endswith("shapes/"):
+    if args.data.endswith("shapes"):
         whole_mean, whole_std = dataset_stats(args, "metadata_whole.csv")
         tub_test_transforms = transforms.Compose([
             transforms.ToTensor(),
