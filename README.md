@@ -1,10 +1,6 @@
 # Degraded-Polygons-RBC
 
-Repository for the paper
-
-[Degraded Polygons Raise Fundamental Questions of Neural Network Perception](https://arxiv.org/abs/2306.04955)
-
-by Leonard Tang and Dan Ley
+Repository for the paper [Degraded Polygons Raise Fundamental Questions of Neural Network Perception](https://arxiv.org/abs/2306.04955) by Leonard Tang and Dan Ley.
 
 ### Shape Generation
 
@@ -48,6 +44,8 @@ python3 train.py --data, -d <DATA>
                  [--pretrained-imagenet, -pi]
                  [--evaluate, -e]
 ```
+
+Model checkpoints can be found at this [link](https://drive.google.com/drive/folders/1e3fQ6EXwb1abLKXGcaLKzLGpJKFGXKm3?usp=drive_link).
 
 Parameters:
 - ```DATA``` &mdash; directory of dataset (default: './images224/shapes')
