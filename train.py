@@ -250,11 +250,11 @@ def main():
     
     save_suffix = ""
     if args.pretrained_imagenet:
-        save_suffix = "imagenet"
+        save_suffix = "_imagenet"
     elif args.pretrained_path:
-        save_suffix = args.pretrained_path.split("/")[-1].split(".")[0]
+        save_suffix = "_" + args.pretrained_path.split("/")[-1].split(".")[0]
 
-    save_file = os.path.join(sub_save_dir, f"final_model_{args.model}_seed_{args.seed}.pth")
+    save_file = os.path.join(sub_save_dir, f"final_model_{args.model}_seed_{args.seed}{save_suffix}.pth")
     print("\nSave File:", save_file)
 
     ### Main training loop
