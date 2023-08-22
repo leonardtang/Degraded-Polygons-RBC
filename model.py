@@ -5,12 +5,8 @@ import torch
 from os.path import join as pjoin
 from torch import nn
 from torch.nn.modules.utils import _pair
-from functools import partial
-from einops.layers.torch import Rearrange, Reduce
+from functools import partialmethod
 from torchvision import models
-from vit_pytorch import SimpleViT
-from vit_pytorch.efficient import ViT
-from linformer import Linformer
 
 TOK_FC_0 = "token_mixing/Dense_0"
 TOK_FC_1 = "token_mixing/Dense_1"
